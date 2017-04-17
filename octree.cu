@@ -1,25 +1,33 @@
 #include <cstdlib>
-#include <thrust/device_vector.h>
-#include <thrust/generate.h>
-#include <thrust/random.h>
+#include <iostream>
 #include "octree.h"
 
 #define COORD_MAX 40.0f
+#define COORD_MIN -40.0f
 
-__host__ static __inline__ thrust::tuple<float, float, float> rnd()
+FLOAT3 * unc_pos;
+FLOAT3 * dev_buffer1;
+FLOAT3 * dev_buffer2;
+Octree_node * dev_nodes;
+const int THREADS_PER_BLOCK = 128;
+const int shared_mem = 16*sizeof(int);
+
+__host__ static __inline__ void rnd()
 {
-  thrust::default_random_engine rng;
-  thrust::uniform_real_distribution<float> dist(-COORD_MAX, COORD_MAX);
-  thrust::tuple<float, float, float> t(dist(rng), dist(rng), dist(rng));
-  return t;
+  for (int i = 0; i < nbody; i++) {
+    unc_pos[i].x = COORD_MIN + (rand() / ( RAND_MAX / (COORD_MAX-COORD_MIN) ) ) ;
+    unc_pos[i].y = COORD_MIN + (rand() / ( RAND_MAX / (COORD_MAX-COORD_MIN) ) ) ;
+    unc_pos[i].z = COORD_MIN + (rand() / ( RAND_MAX / (COORD_MAX-COORD_MIN) ) ) ;
+  }
 }
 
-__device__ bool check_points(Octree_node &node, Points *points, int num_points, Parameters params){
+__device__ bool check_points(Octree_node &node, FLOAT3 *points1, FLOAT3 *points2, int num_points, Parameters params){
   if(params.depth >= params.max_depth || num_points <= params.min_points){
     if(params.point_selector == 1){
       int it = node.points_begin(); int end = node.points_end();
       for(it += threadIdx.x; it < end; it += blockDim.x){
-        points[0].set_point(it, points[1].get_point(it));
+        points1[it] = points2[it];
+        // points[0].set_point(it, points[1].get_point(it));
       }
     }
     return true;
@@ -27,12 +35,12 @@ __device__ bool check_points(Octree_node &node, Points *points, int num_points, 
   return false;
 }
 
-__device__ void count_points(const Points &in_points, int *smem, int range_begin, int range_end, float3 center){
+__device__ void count_points(const FLOAT3 *in_points, int *smem, int range_begin, int range_end, FLOAT3 center){
   if(threadIdx.x < 8) smem[threadIdx.x] = 0;
   __syncthreads();
 
   for(int iter=range_begin+threadIdx.x; iter<range_end; iter+=blockDim.x){
-    float3 p = in_points.get_point(iter);
+    FLOAT3 p = in_points[iter];
 
     int x = p.x < center.x ? 0 : 1;
     int y = p.y < center.y ? 0 : 1;
@@ -58,11 +66,11 @@ __device__ void scan_offsets(int node_points_begin, int* smem){
   __syncthreads();
 }
 
-__device__ void reorder_points(Points &out_points, const Points &in_points, int *smem, int range_begin, int range_end, float3 center){
+__device__ void reorder_points(FLOAT3 *out_points, const FLOAT3 *in_points, int *smem, int range_begin, int range_end, FLOAT3 center){
   int *smem2 = &smem[8];
 
   for(int iter = range_begin+threadIdx.x; iter<range_end; iter+=blockDim.x){
-    float3 p = in_points.get_point(iter);
+    FLOAT3 p = in_points[iter];
 
     int x = p.x < center.x ? 0 : 1;
     int y = p.y < center.y ? 0 : 1;
@@ -71,7 +79,7 @@ __device__ void reorder_points(Points &out_points, const Points &in_points, int 
     int i = x*4 + y*2 + z;
 
     int dest = atomicAdd(&smem2[i], 1);
-    out_points.set_point(dest, p);
+    out_points[dest] = p;
   }
 
   __syncthreads();
@@ -85,7 +93,7 @@ __device__ void prepare_children(Octree_node *children, Octree_node &node, int *
     children[child_offset+i].set_id(8*node.id()+(i*8));
   }
 
-  const float3 center = node.center();
+  const FLOAT3 center = node.center();
   float half = node.width() / 2.0f;
   float quarter = half / 2.0f;
 
@@ -104,22 +112,24 @@ __device__ void prepare_children(Octree_node *children, Octree_node &node, int *
   }
 }
 
-__global__ void build_octree_kernel(Octree_node *nodes, Points *points, Parameters params){
+__global__ void build_octree_kernel(Octree_node *nodes, FLOAT3 *points1, FLOAT3 *points2, Parameters params){
   __shared__ int smem[16];
 
   Octree_node &node = nodes[blockIdx.x];
   node.set_id(node.id() + blockIdx.x);
   int num_points = node.num_points();
 
-  bool exit = check_points(node, points, num_points, params);
+  bool exit = check_points(node, points1, points2, num_points, params);
   if(exit) return;
 
   float3 center = node.center();
 
   int range_begin = node.points_begin();
   int range_end = node.points_end();
-  const Points &in_points = points[params.point_selector];
-  Points &out_points = points[(params.point_selector + 1) % 2];
+  // const Points &in_points = points[params.point_selector];
+  const FLOAT3* in_points = params.point_selector == 0 ? points1 : points2;
+  // Points &out_points = points[(params.point_selector + 1) % 2];
+  FLOAT3 *out_points = params.point_selector == 0 ? points2 : points1;
 
   count_points(in_points, smem, range_begin, range_end, center);
 
@@ -130,53 +140,31 @@ __global__ void build_octree_kernel(Octree_node *nodes, Points *points, Paramete
   if(threadIdx.x == blockDim.x-1){
     Octree_node *children = &nodes[params.nodes_in_level];
     prepare_children(children, node, smem);
-    build_octree_kernel<<<8, blockDim.x, 16*sizeof(int)>>>(children, points, Parameters(params, true));
+    build_octree_kernel<<<8, blockDim.x, 16*sizeof(int)>>>(children, points1, points2, Parameters(params, true));
   }
 }
 
 int main(){
-  const int nbody = 76;
 
-  thrust::device_vector<float> x_d0(nbody);
-  thrust::device_vector<float> x_d1(nbody);
-  thrust::device_vector<float> y_d0(nbody);
-  thrust::device_vector<float> y_d1(nbody);
-  thrust::device_vector<float> z_d0(nbody);
-  thrust::device_vector<float> z_d1(nbody);
+  unc_pos = new FLOAT3[nbody];
+  rnd();
 
-  // RandGen rnd;
-  thrust::generate(
-    thrust::make_zip_iterator(thrust::make_tuple(x_d0.begin(), y_d0.begin(), z_d0.begin())),
-    thrust::make_zip_iterator(thrust::make_tuple(x_d1.end(), y_d1.end(), z_d1.end())),
-    rnd
-  );
-
-  Points points_init[2];
-  points_init[0].set(thrust::raw_pointer_cast(&x_d0[0]),
-                    thrust::raw_pointer_cast(&y_d0[0]),
-                    thrust::raw_pointer_cast(&z_d0[0]));
-  points_init[1].set(thrust::raw_pointer_cast(&x_d1[0]),
-                    thrust::raw_pointer_cast(&y_d1[0]),
-                    thrust::raw_pointer_cast(&z_d1[0]));
-
-  Points *points;
-  cudaMalloc((void**) &points, 2*sizeof(Points));
-  cudaMemcpy(points, points_init, 2*sizeof(Points), cudaMemcpyHostToDevice);
+  cudaMalloc((void**) &dev_buffer1, nbody*sizeof(FLOAT3));
+  cudaMalloc((void**) &dev_buffer2, nbody*sizeof(FLOAT3));
+  cudaMemcpy(dev_buffer1, unc_pos, nbody*sizeof(FLOAT3), cudaMemcpyHostToDevice);
 
   Octree_node root;
   root.set_range(0, nbody);
   root.set_width(2*COORD_MAX);
-  Octree_node *nodes;
-  cudaMalloc((void **)&nodes, nbody*sizeof(Octree_node));
-  cudaMemcpy(nodes, &root, sizeof(Octree_node), cudaMemcpyHostToDevice);
+  cudaMalloc((void **)&dev_nodes, nbody*sizeof(Octree_node));
+  cudaMemcpy(dev_nodes, &root, sizeof(Octree_node), cudaMemcpyHostToDevice);
 
   Parameters params(nbody);
-  const int THREADS_PER_BLOCK = 128;
-  const int shared_mem = 16*sizeof(int);
-  build_octree_kernel<<<1, THREADS_PER_BLOCK, shared_mem>>>(nodes, points, params);
+  build_octree_kernel<<<1, THREADS_PER_BLOCK, shared_mem>>>(dev_nodes, dev_buffer1, dev_buffer2, params);
   cudaGetLastError();
 
-  cudaFree(nodes);
-  cudaFree(points);
+  cudaFree(dev_nodes);
+  cudaFree(dev_buffer1);
+  cudaFree(dev_buffer2);
 
 }

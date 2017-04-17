@@ -1,29 +1,20 @@
-class Points {
-  float *x;
-  float *y;
-  float *z;
+#ifdef SOP_FP_DOUBLE
+#define FLOAT double
+#define FLOAT3 double3
+#else
+#define FLOAT float
+#define FLOAT3 float3
+#endif
 
-public:
-  __host__ __device__ Points(): x(NULL), y(NULL), z(NULL) {}
+const int nbody = 76;
 
-  __host__ __device__ Points(float *xi, float *yi, float *zi): x(xi), y(yi), z(zi) {}
-
-  __host__ __device__ __forceinline__ float3 get_point(int idx) const {
-    return make_float3(x[idx], y[idx], z[idx]);
-  }
-
-  __host__ __device__ __forceinline__ void set_point(int idx, const float3 &p){
-    x[idx] = p.x; y[idx] = p.y; z[idx] = p.z;
-  }
-
-  __host__ __device__ __forceinline__ void set(float *xi, float *yi, float *zi){
-    x = xi; y = yi; z = zi;
-  }
-};
+extern FLOAT3* unc_pos;
+extern FLOAT3* dev_buffer1;
+extern FLOAT3* dev_buffer2;
 
 class Octree_node {
   int m_id;
-  float3 m_center;
+  FLOAT3 m_center;
   int begin, end;
   float m_width;
 
@@ -38,7 +29,7 @@ public:
     m_id = new_id;
   }
 
-  __host__ __device__ __forceinline__ float3 center() const {
+  __host__ __device__ __forceinline__ FLOAT3 center() const {
     return m_center;
   }
 
@@ -86,3 +77,5 @@ struct Parameters {
   nodes_in_level(8*params.nodes_in_level),
   depth(params.depth+1) {}
 };
+
+extern Octree_node *dev_nodes;
