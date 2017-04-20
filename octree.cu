@@ -163,6 +163,13 @@ int main(){
   build_octree_kernel<<<1, THREADS_PER_BLOCK, shared_mem>>>(dev_nodes, dev_buffer1, dev_buffer2, params);
   cudaGetLastError();
 
+  FLOAT3 * out = new FLOAT3[nbody];
+  cudaMemcpy(out, dev_buffer1, nbody*sizeof(FLOAT3), cudaMemcpyDeviceToHost);
+
+  for (int i = 0; i < nbody; i++) {
+    std::cout << unc_pos[i].x << " " << out[i].x << " + " << unc_pos[i].y << " " << out[i].y << " + " << unc_pos[i].z << " " << out[i].z << '\n';
+  }
+
   cudaFree(dev_nodes);
   cudaFree(dev_buffer1);
   cudaFree(dev_buffer2);
