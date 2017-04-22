@@ -8,7 +8,8 @@
 FLOAT3 * unc_pos;
 FLOAT3 * dev_buffer1;
 FLOAT3 * dev_buffer2;
-Octree_node * dev_nodes;
+__device__ Octree_node * dev_nodes;
+__device__ int * num_nodes;
 const int THREADS_PER_BLOCK = 128;
 const int shared_mem = 16*sizeof(int);
 
@@ -87,10 +88,11 @@ __device__ void reorder_points(FLOAT3 *out_points, const FLOAT3 *in_points, int 
 
 __device__ void prepare_children(Octree_node *children, Octree_node &node, int *smem){
 
-  int child_offset = 8*node.id();
+  //int child_offset = 8*node.id();
+  int child_offset = 0;
 
   for(int i = 0; i < 8; i++){
-    children[child_offset+i].set_id(8*node.id()+(i*8));
+    //children[child_offset+i].set_id(8*node.id()+(i*8));
   }
 
   const FLOAT3 center = node.center();
@@ -122,7 +124,7 @@ __global__ void build_octree_kernel(Octree_node *nodes, FLOAT3 *points1, FLOAT3 
   __shared__ int smem[16];
 
   Octree_node &node = nodes[blockIdx.x];
-  node.set_id(node.id() + blockIdx.x);
+  //node.set_id(node.id() + blockIdx.x);
   int num_points = node.num_points();
 
   bool exit = check_points(node, points1, points2, num_points, params);
@@ -145,7 +147,7 @@ __global__ void build_octree_kernel(Octree_node *nodes, FLOAT3 *points1, FLOAT3 
 
  __syncthreads();
   if (threadIdx.x == 1) {
-    printf("\nblock: %d depth: %d #: %d id:%d counts are \n %d %d %d %d %d %d %d %d\n %d %d %d %d %d %d %d %d\n", blockIdx.x, params.depth, num_points, node.id(),
+    printf("\nblock: %d depth: %d #: %d counts are \n %d %d %d %d %d %d %d %d\n %d %d %d %d %d %d %d %d\n", blockIdx.x, params.depth, num_points,
 	smem[0], smem[1], smem[2], smem[3], smem[4], smem[5], smem[6], smem[7],
 	smem[8], smem[9], smem[10], smem[11], smem[12], smem[13], smem[14], smem[15]);
   }
@@ -153,7 +155,7 @@ __global__ void build_octree_kernel(Octree_node *nodes, FLOAT3 *points1, FLOAT3 
   reorder_points(out_points, in_points, smem, range_begin, range_end, center);
 
   if(threadIdx.x == blockDim.x-1){
-    Octree_node *children = &nodes[params.nodes_in_level];
+    Octree_node *children = &nodes[num_nodes];
     prepare_children(children, node, smem);
     build_octree_kernel<<<8, blockDim.x, 16*sizeof(int)>>>(children, points1, points2, Parameters(params, true));
   }
@@ -167,6 +169,10 @@ int main(){
   cudaMalloc((void**) &dev_buffer1, nbody*sizeof(FLOAT3));
   cudaMalloc((void**) &dev_buffer2, nbody*sizeof(FLOAT3));
   cudaMemcpy(dev_buffer1, unc_pos, nbody*sizeof(FLOAT3), cudaMemcpyHostToDevice);
+
+  cudaMalloc((void **)&num_nodes, sizeof(int));
+  int *init = [1];
+  cudaMemcpy(num_nodes, init, sizeof(int), cudaMemcpyHostToDevice);
 
   Octree_node root;
   root.set_range(0, nbody);
