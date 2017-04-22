@@ -2,7 +2,7 @@ NVCC = nvcc
 INCDIRS=-I/usr/local/cuda-6.5/include
 EFILE = octree.out
 OBJS = octree.o
-CUDAFLAGS = -std=c++11 -arch=sm_35 -rdc=true
+CUDAFLAGS = -std=c++11 -arch=sm_35 -rdc=true -g -G
 
 octree.out: $(OBJS)
 	@echo "linking ..."

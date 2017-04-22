@@ -96,19 +96,25 @@ __device__ void prepare_children(Octree_node *children, Octree_node &node, int *
   const FLOAT3 center = node.center();
   float half = node.width() / 2.0f;
   float quarter = half / 2.0f;
+  smem[7] = node.points_begin();
 
   for(int i = 0; i < 8; i++){
-    float xf, yf, zf;
-    xf = i / 4 == 0 ? -1.0f : 1.0f;
-    yf = (i-4) / 4 == 0 ? -1.0f : 1.0f;
-    zf = i % 2 == 0 ? -1.0f : 1.0f;
+    int xf, yf, zf;
+    zf = i % 2; 
+    if (zf == 0) zf = -1;
+    
+    yf = (i / 2) % 2;
+    if (yf == 0) yf = -1;
+
+    xf = i / 4;
+    if (xf == 0) xf = -1;
 
     children[child_offset+i].set_center(center.x + quarter * xf,
                                         center.y + quarter * yf,
                                         center.z + quarter * zf);
 
     children[child_offset+i].set_width(half);
-    children[child_offset+i].set_range(smem[8+i], smem[i]+smem[8+i]);
+    children[child_offset+i].set_range(smem[7+i], smem[8+i]);
   }
 }
 
@@ -126,6 +132,7 @@ __global__ void build_octree_kernel(Octree_node *nodes, FLOAT3 *points1, FLOAT3 
 
   int range_begin = node.points_begin();
   int range_end = node.points_end();
+
   // const Points &in_points = points[params.point_selector];
   const FLOAT3* in_points = params.point_selector == 0 ? points1 : points2;
   // Points &out_points = points[(params.point_selector + 1) % 2];
@@ -134,6 +141,14 @@ __global__ void build_octree_kernel(Octree_node *nodes, FLOAT3 *points1, FLOAT3 
   count_points(in_points, smem, range_begin, range_end, center);
 
   scan_offsets(node.points_begin(), smem);
+
+
+ __syncthreads();
+  if (threadIdx.x == 1) {
+    printf("\nblock: %d depth: %d #: %d id:%d counts are \n %d %d %d %d %d %d %d %d\n %d %d %d %d %d %d %d %d\n", blockIdx.x, params.depth, num_points, node.id(),
+	smem[0], smem[1], smem[2], smem[3], smem[4], smem[5], smem[6], smem[7],
+	smem[8], smem[9], smem[10], smem[11], smem[12], smem[13], smem[14], smem[15]);
+  }
 
   reorder_points(out_points, in_points, smem, range_begin, range_end, center);
 
@@ -166,9 +181,9 @@ int main(){
   FLOAT3 * out = new FLOAT3[nbody];
   cudaMemcpy(out, dev_buffer1, nbody*sizeof(FLOAT3), cudaMemcpyDeviceToHost);
 
-  for (int i = 0; i < nbody; i++) {
+ /* for (int i = 0; i < nbody; i++) {
     std::cout << unc_pos[i].x << " " << out[i].x << " + " << unc_pos[i].y << " " << out[i].y << " + " << unc_pos[i].z << " " << out[i].z << '\n';
-  }
+  }*/
 
   cudaFree(dev_nodes);
   cudaFree(dev_buffer1);

@@ -19,7 +19,9 @@ class Octree_node {
   float m_width;
 
 public:
-  __host__ __device__ Octree_node() : m_id(0), begin(0), end(0), m_width(0) {}
+  __host__ __device__ Octree_node() : m_id(0), begin(0), end(0), m_width(0) {
+  m_center.x = 0.0; m_center.y=0.0; m_center.z=0.0;
+  }
 
   __host__ __device__ int id() const {
     return m_id;
@@ -75,6 +77,8 @@ struct Parameters {
   __host__ __device__ Parameters(const Parameters &params, bool):
   point_selector((params.point_selector+1)%2),
   nodes_in_level(8*params.nodes_in_level),
+  min_points(params.min_points),
+  max_depth(params.max_depth),
   depth(params.depth+1) {}
 };
 
