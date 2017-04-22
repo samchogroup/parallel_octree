@@ -102,9 +102,9 @@ __device__ void prepare_children(Octree_node *children, Octree_node &node, int *
 
   for(int i = 0; i < 8; i++){
     int xf, yf, zf;
-    zf = i % 2; 
+    zf = i % 2;
     if (zf == 0) zf = -1;
-    
+
     yf = (i / 2) % 2;
     if (yf == 0) yf = -1;
 
@@ -181,7 +181,7 @@ int main(){
   cudaMemcpy(dev_nodes, &root, sizeof(Octree_node), cudaMemcpyHostToDevice);
 
   Parameters params(nbody);
-  build_octree_kernel<<<1, THREADS_PER_BLOCK, shared_mem>>>(dev_nodes, dev_buffer1, dev_buffer2, params);
+  build_octree_kernel<<<1, THREADS_PER_BLOCK, shared_mem>>>(dev_nodes, num_nodes, dev_buffer1, dev_buffer2, params);
   cudaGetLastError();
 
   FLOAT3 * out = new FLOAT3[nbody];
@@ -191,6 +191,7 @@ int main(){
     std::cout << unc_pos[i].x << " " << out[i].x << " + " << unc_pos[i].y << " " << out[i].y << " + " << unc_pos[i].z << " " << out[i].z << '\n';
   }*/
 
+  cudaFree(num_nodes);
   cudaFree(dev_nodes);
   cudaFree(dev_buffer1);
   cudaFree(dev_buffer2);

@@ -75,4 +75,3 @@ struct Parameters {
   point_selector((params.point_selector+1)%2),
   depth(params.depth+1) {}
 };
-
