@@ -72,6 +72,8 @@ struct Parameters {
   __host__ __device__ Parameters(int idepth) : point_selector(0), depth(0), min_points(1), max_depth(idepth) {}
 
   __host__ __device__ Parameters(const Parameters &params, bool):
+  max_depth(params.max_depth),
+  min_points(params.min_points),
   point_selector((params.point_selector+1)%2),
   depth(params.depth+1) {}
 };
